@@ -3,27 +3,13 @@ import XCTest
 @testable import EduWhiteBoardiOS
 
 final class EduWhiteBoardiOSTests: XCTestCase {
-    func testScreenLayoutKeepsCanvasSymmetricAndNearBottom() {
-        let metrics = WhiteboardScreenLayout.metrics(
-            viewportSize: CGSize(width: 393, height: 852),
-            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0)
-        )
-
-        XCTAssertEqual(metrics.horizontalInset, 12)
-        XCTAssertEqual(metrics.canvasFrame.minX, 12)
-        XCTAssertEqual(metrics.canvasFrame.maxX, 381)
-        XCTAssertEqual(metrics.canvasFrame.maxY, 818)
-        XCTAssertLessThan(metrics.canvasFrame.minY, 180)
+    func testScreenLayoutUsesSymmetricChromePadding() {
+        XCTAssertEqual(WhiteboardScreenLayout.horizontalInset(for: 402), 12)
+        XCTAssertEqual(WhiteboardScreenLayout.horizontalInset(for: 259), 12)
     }
 
-    func testCompactScreenLayoutKeepsEqualHorizontalMargins() {
-        let metrics = WhiteboardScreenLayout.metrics(
-            viewportSize: CGSize(width: 259, height: 568),
-            safeAreaInsets: EdgeInsets(top: 47, leading: 0, bottom: 21, trailing: 0)
-        )
-
-        XCTAssertEqual(metrics.canvasFrame.minX, metrics.horizontalInset)
-        XCTAssertEqual(metrics.canvasFrame.maxX, 259 - metrics.horizontalInset)
+    func testWideScreenLayoutUsesSmallMarginsInsteadOfCappedContentFrame() {
+        XCTAssertEqual(WhiteboardScreenLayout.horizontalInset(for: 800), 18)
     }
 
     func testBadgeCenterCanMoveOutsideCanvasForClipping() {

@@ -173,49 +173,12 @@ enum WhiteboardConstants {
     static let documentStorageKey = "edu-whiteboard.native.document"
 }
 
-struct WhiteboardScreenMetrics: Equatable {
-    let horizontalInset: CGFloat
-    let contentWidth: CGFloat
-    let toolbarTopInset: CGFloat
-    let canvasFrame: CGRect
-    let canvasBottomInset: CGFloat
-    let voiceBottomInset: CGFloat
-}
-
 enum WhiteboardScreenLayout {
-    private static let maxContentWidth: CGFloat = 560
-    private static let minimumHorizontalInset: CGFloat = 12
-    private static let maximumHorizontalInset: CGFloat = 18
-    private static let toolbarTopGap: CGFloat = 8
-    private static let canvasTopGapBelowSafeArea: CGFloat = 104
-    private static let minimumCanvasBottomInset: CGFloat = 12
-    private static let voiceBottomGap: CGFloat = 8
+    static let verticalSpacing: CGFloat = 8
+    static let voiceBottomInset: CGFloat = 8
 
-    static func metrics(viewportSize: CGSize, safeAreaInsets: EdgeInsets) -> WhiteboardScreenMetrics {
-        let horizontalInset = min(
-            max((viewportSize.width - maxContentWidth) / 2, minimumHorizontalInset),
-            maximumHorizontalInset
-        )
-        let contentWidth = max(1, viewportSize.width - horizontalInset * 2)
-        let toolbarTopInset = safeAreaInsets.top + toolbarTopGap
-        let canvasTopInset = safeAreaInsets.top + canvasTopGapBelowSafeArea
-        let canvasBottomInset = max(safeAreaInsets.bottom, minimumCanvasBottomInset)
-        let canvasHeight = max(1, viewportSize.height - canvasTopInset - canvasBottomInset)
-        let canvasFrame = CGRect(
-            x: horizontalInset,
-            y: canvasTopInset,
-            width: contentWidth,
-            height: canvasHeight
-        )
-
-        return WhiteboardScreenMetrics(
-            horizontalInset: horizontalInset,
-            contentWidth: contentWidth,
-            toolbarTopInset: toolbarTopInset,
-            canvasFrame: canvasFrame,
-            canvasBottomInset: canvasBottomInset,
-            voiceBottomInset: canvasBottomInset + voiceBottomGap
-        )
+    static func horizontalInset(for viewportWidth: CGFloat) -> CGFloat {
+        viewportWidth >= 700 ? 18 : 12
     }
 }
 

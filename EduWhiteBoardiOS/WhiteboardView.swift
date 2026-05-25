@@ -1,5 +1,24 @@
 import SwiftUI
 
+extension View {
+    func debugLayout(_ color: Color = .red) -> some View {
+        self.overlay {
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    Rectangle()
+                        .stroke(color, lineWidth: 2)
+
+                    Text("\(Int(geo.size.width))×\(Int(geo.size.height))")
+                        .font(.caption2)
+                        .foregroundStyle(.white)
+                        .padding(2)
+                        .background(color)
+                }
+            }
+        }
+    }
+}
+
 struct WhiteboardScreen: View {
     @StateObject private var store = WhiteboardStore()
     @StateObject private var speech = SpeechTranscriptionManager()
@@ -9,69 +28,56 @@ struct WhiteboardScreen: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let viewportSize = proxy.size
-            let layout = WhiteboardScreenLayout.metrics(viewportSize: viewportSize, safeAreaInsets: proxy.safeAreaInsets)
-            let fallbackCanvasSize = layout.canvasFrame.size
+            let horizontalInset = WhiteboardScreenLayout.horizontalInset(for: proxy.size.width)
             let activeCanvasSize = canvasViewportSize.width > 0 && canvasViewportSize.height > 0
                 ? canvasViewportSize
-                : fallbackCanvasSize
+                : proxy.size
 
             ZStack {
                 WhiteboardBackdrop()
                     .ignoresSafeArea()
 
-                WhiteboardCanvas(
-                    store: store,
-                    viewportSize: activeCanvasSize,
-                    panOrigin: $panOrigin,
-                    zoomOrigin: $zoomOrigin
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay {
-                    GeometryReader { canvasProxy in
-                        Color.clear
-                            .onAppear {
-                                updateCanvasViewportSize(canvasProxy.size)
-                            }
-                            .onChange(of: canvasProxy.size) { _, newSize in
-                                updateCanvasViewportSize(newSize)
-                            }
-                    }
-                }
-                .padding(.horizontal, layout.horizontalInset)
-                .padding(.top, layout.canvasFrame.minY)
-                .padding(.bottom, layout.canvasBottomInset)
-
-                VStack(spacing: 0) {
+                VStack(spacing: WhiteboardScreenLayout.verticalSpacing) {
                     ToolbarStrip(store: store, viewportSize: activeCanvasSize)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, layout.toolbarTopInset)
-                        .padding(.horizontal, layout.horizontalInset)
 
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
-                VStack {
-                    Spacer(minLength: 0)
-
-                    VoiceDockButton(speech: speech) { text in
-                        store.createTextFromAsr(text, in: activeCanvasSize)
-                    } onToast: { message in
-                        store.showToast(message)
+                    WhiteboardCanvas(
+                        store: store,
+                        viewportSize: activeCanvasSize,
+                        panOrigin: $panOrigin,
+                        zoomOrigin: $zoomOrigin
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                    .overlay {
+                        GeometryReader { canvasProxy in
+                            Color.clear
+                                .onAppear {
+                                    updateCanvasViewportSize(canvasProxy.size)
+                                }
+                                .onChange(of: canvasProxy.size) { _, newSize in
+                                    updateCanvasViewportSize(newSize)
+                                }
+                        }
                     }
-                    .padding(.bottom, layout.voiceBottomInset)
+                    .overlay(alignment: .bottom) {
+                        VoiceDockButton(speech: speech) { text in
+                            store.createTextFromAsr(text, in: activeCanvasSize)
+                        } onToast: { message in
+                            store.showToast(message)
+                        }
+                        .padding(.bottom, WhiteboardScreenLayout.voiceBottomInset)
+                    }
+                    .overlay(alignment: .top) {
+                        ToastOverlay(messages: store.toasts)
+                            .padding(.top, WhiteboardScreenLayout.verticalSpacing)
+                    }
                 }
-
-                VStack {
-                    Spacer(minLength: layout.canvasFrame.minY + 16)
-
-                    ToastOverlay(messages: store.toasts)
-                        .frame(width: layout.contentWidth)
-
-                    Spacer(minLength: 0)
-                }
+                .padding(.horizontal, horizontalInset)
+                .padding(.top, WhiteboardScreenLayout.verticalSpacing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // .debugLayout(.red)
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .sheet(isPresented: $store.isHelpPresented) {
                 WhiteboardHelpSheet()
                     .presentationDetents([.medium, .large])
@@ -84,6 +90,8 @@ struct WhiteboardScreen: View {
                 store.configureInitialViewport(size: newSize)
             }
         }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .debugLayout(.red)
     }
 
     private func updateCanvasViewportSize(_ size: CGSize) {
