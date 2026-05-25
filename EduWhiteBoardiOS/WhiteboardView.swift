@@ -9,45 +9,46 @@ struct WhiteboardScreen: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let safeInsets = proxy.safeAreaInsets
             let viewportSize = proxy.size
-            let horizontalPadding = min(max((viewportSize.width - 560) / 2, 10), 18)
-            let contentWidth = max(1, viewportSize.width - horizontalPadding * 2)
-            let fallbackCanvasSize = CGSize(
-                width: contentWidth,
-                height: max(1, viewportSize.height - safeInsets.top - safeInsets.bottom - 120)
-            )
-            let activeCanvasHeight = canvasViewportSize.height > 0 ? canvasViewportSize.height : fallbackCanvasSize.height
-            let activeCanvasSize = CGSize(width: contentWidth, height: activeCanvasHeight)
+            let layout = WhiteboardScreenLayout.metrics(viewportSize: viewportSize, safeAreaInsets: proxy.safeAreaInsets)
+            let fallbackCanvasSize = layout.canvasFrame.size
+            let activeCanvasSize = canvasViewportSize.width > 0 && canvasViewportSize.height > 0
+                ? canvasViewportSize
+                : fallbackCanvasSize
 
             ZStack {
                 WhiteboardBackdrop()
                     .ignoresSafeArea()
 
-                VStack(spacing: 10) {
-                    ToolbarStrip(store: store, viewportSize: activeCanvasSize)
-                        .padding(.top, safeInsets.top + 8)
-                        .frame(width: contentWidth)
-
-                    WhiteboardCanvas(
-                        store: store,
-                        viewportSize: activeCanvasSize,
-                        panOrigin: $panOrigin,
-                        zoomOrigin: $zoomOrigin
-                    )
-                    .frame(width: contentWidth)
-                    .overlay {
-                        GeometryReader { canvasProxy in
-                            Color.clear
-                                .onAppear {
-                                    updateCanvasViewportSize(canvasProxy.size)
-                                }
-                                .onChange(of: canvasProxy.size) { _, newSize in
-                                    updateCanvasViewportSize(newSize)
-                                }
-                        }
+                WhiteboardCanvas(
+                    store: store,
+                    viewportSize: activeCanvasSize,
+                    panOrigin: $panOrigin,
+                    zoomOrigin: $zoomOrigin
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    GeometryReader { canvasProxy in
+                        Color.clear
+                            .onAppear {
+                                updateCanvasViewportSize(canvasProxy.size)
+                            }
+                            .onChange(of: canvasProxy.size) { _, newSize in
+                                updateCanvasViewportSize(newSize)
+                            }
                     }
-                    .padding(.bottom, 18)
+                }
+                .padding(.horizontal, layout.horizontalInset)
+                .padding(.top, layout.canvasFrame.minY)
+                .padding(.bottom, layout.canvasBottomInset)
+
+                VStack(spacing: 0) {
+                    ToolbarStrip(store: store, viewportSize: activeCanvasSize)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, layout.toolbarTopInset)
+                        .padding(.horizontal, layout.horizontalInset)
+
+                    Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
@@ -59,14 +60,14 @@ struct WhiteboardScreen: View {
                     } onToast: { message in
                         store.showToast(message)
                     }
-                    .padding(.bottom, max(safeInsets.bottom, 12) + 8)
+                    .padding(.bottom, layout.voiceBottomInset)
                 }
 
                 VStack {
-                    Spacer(minLength: safeInsets.top + 96)
+                    Spacer(minLength: layout.canvasFrame.minY + 16)
 
                     ToastOverlay(messages: store.toasts)
-                        .frame(width: contentWidth)
+                        .frame(width: layout.contentWidth)
 
                     Spacer(minLength: 0)
                 }
@@ -139,6 +140,7 @@ private struct WhiteboardCanvas: View {
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
 
             CanvasBadgeOverlay(store: store)
+                .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
 
             if store.items.isEmpty {
                 VStack(spacing: 10) {
@@ -537,15 +539,24 @@ private struct CanvasBadgeOverlay: View {
                     ForEach(item.annotations) { annotation in
                         let rects = TextLayoutEngine.annotationRects(in: layout.characterBoxes, annotation: annotation)
                         if let localAnchor = TextLayoutEngine.anchor(for: rects) {
-                            let anchorScreen = screenPoint(item: item, localPoint: localAnchor)
-                            let badgeXMin = badgeSize / 2 + 8
-                            let badgeXMax = max(badgeXMin, geo.size.width - badgeSize / 2 - 8)
-                            let badgeYMin = badgeSize / 2 + 8
-                            let badgeYMax = max(badgeYMin, geo.size.height - badgeSize / 2 - 8)
-                            let badgeCenter = CGPoint(
-                                x: anchorScreen.x.clamped(to: badgeXMin...badgeXMax),
-                                y: (anchorScreen.y - badgeSize / 2 - badgeGap).clamped(to: badgeYMin...badgeYMax)
+                            let anchorScreen = WhiteboardCanvasGeometry.screenPoint(
+                                item: item,
+                                localPoint: localAnchor,
+                                zoom: store.zoom,
+                                cameraOffset: store.cameraOffset
                             )
+                            let badgeCenter = WhiteboardCanvasGeometry.badgeCenter(
+                                for: anchorScreen,
+                                badgeSize: badgeSize,
+                                gap: badgeGap
+                            )
+                            let badgeFrame = CGRect(
+                                x: badgeCenter.x - badgeSize / 2,
+                                y: badgeCenter.y - badgeSize / 2,
+                                width: badgeSize,
+                                height: badgeSize
+                            )
+                            let isBadgeVisible = badgeFrame.intersects(CGRect(origin: .zero, size: geo.size))
                             let isActive = activeEntry == ActiveBadge(itemID: item.id, annotationID: annotation.id)
 
                             Button {
@@ -569,7 +580,7 @@ private struct CanvasBadgeOverlay: View {
                             .position(badgeCenter)
                             .zIndex(isActive ? 50 : 10)
 
-                            if isActive {
+                            if isActive && isBadgeVisible {
                                 let menuXMin = menuWidth / 2 + 8
                                 let menuXMax = max(menuXMin, geo.size.width - menuWidth / 2 - 8)
                                 let menuCX = badgeCenter.x.clamped(to: menuXMin...menuXMax)
@@ -606,17 +617,6 @@ private struct CanvasBadgeOverlay: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-    }
-
-    private func screenPoint(item: WhiteboardTextCard, localPoint: CGPoint) -> CGPoint {
-        let zoom = store.zoom
-        let offset = store.cameraOffset
-        let cardLeft = item.center.x - item.size.width / 2
-        let cardTop = item.center.y - item.size.height / 2
-        return CGPoint(
-            x: (cardLeft + localPoint.x) * zoom + offset.width,
-            y: (cardTop + localPoint.y) * zoom + offset.height
-        )
     }
 }
 

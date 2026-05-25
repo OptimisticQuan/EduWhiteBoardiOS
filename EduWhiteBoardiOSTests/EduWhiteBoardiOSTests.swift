@@ -1,38 +1,39 @@
-//
-//  EduWhiteBoardiOSTests.swift
-//  EduWhiteBoardiOSTests
-//
-//  Created by Wayne Quan on 2026/5/24.
-//
-
+import SwiftUI
 import XCTest
 @testable import EduWhiteBoardiOS
 
 final class EduWhiteBoardiOSTests: XCTestCase {
+    func testScreenLayoutKeepsCanvasSymmetricAndNearBottom() {
+        let metrics = WhiteboardScreenLayout.metrics(
+            viewportSize: CGSize(width: 393, height: 852),
+            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0)
+        )
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+        XCTAssertEqual(metrics.horizontalInset, 12)
+        XCTAssertEqual(metrics.canvasFrame.minX, 12)
+        XCTAssertEqual(metrics.canvasFrame.maxX, 381)
+        XCTAssertEqual(metrics.canvasFrame.maxY, 818)
+        XCTAssertLessThan(metrics.canvasFrame.minY, 180)
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    func testCompactScreenLayoutKeepsEqualHorizontalMargins() {
+        let metrics = WhiteboardScreenLayout.metrics(
+            viewportSize: CGSize(width: 259, height: 568),
+            safeAreaInsets: EdgeInsets(top: 47, leading: 0, bottom: 21, trailing: 0)
+        )
+
+        XCTAssertEqual(metrics.canvasFrame.minX, metrics.horizontalInset)
+        XCTAssertEqual(metrics.canvasFrame.maxX, 259 - metrics.horizontalInset)
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
-    }
+    func testBadgeCenterCanMoveOutsideCanvasForClipping() {
+        let badgeCenter = WhiteboardCanvasGeometry.badgeCenter(
+            for: CGPoint(x: -35, y: -10),
+            badgeSize: 46,
+            gap: 14
+        )
 
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
+        XCTAssertLessThan(badgeCenter.x, 0)
+        XCTAssertLessThan(badgeCenter.y, 0)
     }
-
 }

@@ -173,6 +173,70 @@ enum WhiteboardConstants {
     static let documentStorageKey = "edu-whiteboard.native.document"
 }
 
+struct WhiteboardScreenMetrics: Equatable {
+    let horizontalInset: CGFloat
+    let contentWidth: CGFloat
+    let toolbarTopInset: CGFloat
+    let canvasFrame: CGRect
+    let canvasBottomInset: CGFloat
+    let voiceBottomInset: CGFloat
+}
+
+enum WhiteboardScreenLayout {
+    private static let maxContentWidth: CGFloat = 560
+    private static let minimumHorizontalInset: CGFloat = 12
+    private static let maximumHorizontalInset: CGFloat = 18
+    private static let toolbarTopGap: CGFloat = 8
+    private static let canvasTopGapBelowSafeArea: CGFloat = 104
+    private static let minimumCanvasBottomInset: CGFloat = 12
+    private static let voiceBottomGap: CGFloat = 8
+
+    static func metrics(viewportSize: CGSize, safeAreaInsets: EdgeInsets) -> WhiteboardScreenMetrics {
+        let horizontalInset = min(
+            max((viewportSize.width - maxContentWidth) / 2, minimumHorizontalInset),
+            maximumHorizontalInset
+        )
+        let contentWidth = max(1, viewportSize.width - horizontalInset * 2)
+        let toolbarTopInset = safeAreaInsets.top + toolbarTopGap
+        let canvasTopInset = safeAreaInsets.top + canvasTopGapBelowSafeArea
+        let canvasBottomInset = max(safeAreaInsets.bottom, minimumCanvasBottomInset)
+        let canvasHeight = max(1, viewportSize.height - canvasTopInset - canvasBottomInset)
+        let canvasFrame = CGRect(
+            x: horizontalInset,
+            y: canvasTopInset,
+            width: contentWidth,
+            height: canvasHeight
+        )
+
+        return WhiteboardScreenMetrics(
+            horizontalInset: horizontalInset,
+            contentWidth: contentWidth,
+            toolbarTopInset: toolbarTopInset,
+            canvasFrame: canvasFrame,
+            canvasBottomInset: canvasBottomInset,
+            voiceBottomInset: canvasBottomInset + voiceBottomGap
+        )
+    }
+}
+
+enum WhiteboardCanvasGeometry {
+    static func screenPoint(item: WhiteboardTextCard, localPoint: CGPoint, zoom: CGFloat, cameraOffset: CGSize) -> CGPoint {
+        let cardLeft = item.center.x - item.size.width / 2
+        let cardTop = item.center.y - item.size.height / 2
+        return CGPoint(
+            x: (cardLeft + localPoint.x) * zoom + cameraOffset.width,
+            y: (cardTop + localPoint.y) * zoom + cameraOffset.height
+        )
+    }
+
+    static func badgeCenter(for anchorScreenPoint: CGPoint, badgeSize: CGFloat, gap: CGFloat) -> CGPoint {
+        CGPoint(
+            x: anchorScreenPoint.x,
+            y: anchorScreenPoint.y - badgeSize / 2 - gap
+        )
+    }
+}
+
 extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
