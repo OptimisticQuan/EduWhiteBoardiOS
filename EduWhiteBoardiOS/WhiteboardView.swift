@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension View {
     func debugLayout(_ color: Color = .red) -> some View {
@@ -23,7 +24,6 @@ struct WhiteboardScreen: View {
     @StateObject private var store = WhiteboardStore()
     @StateObject private var speech = SpeechTranscriptionManager()
     @State private var panOrigin: CGSize?
-    @State private var zoomOrigin: CGFloat?
     @State private var canvasViewportSize: CGSize = .zero
 
     var body: some View {
@@ -49,8 +49,7 @@ struct WhiteboardScreen: View {
                     WhiteboardCanvas(
                         store: store,
                         viewportSize: activeCanvasSize,
-                        panOrigin: $panOrigin,
-                        zoomOrigin: $zoomOrigin
+                        panOrigin: $panOrigin
                     )
                     .frame(width: contentWidth)
                     .frame(maxHeight: .infinity)
@@ -115,89 +114,85 @@ private struct WhiteboardCanvas: View {
     @ObservedObject var store: WhiteboardStore
     let viewportSize: CGSize
     @Binding var panOrigin: CGSize?
-    @Binding var zoomOrigin: CGFloat?
-
-    @State private var lastPinchPanTranslation: CGSize = .zero
-    @State private var isCanvasPanning = false
-    @State private var isCanvasZooming = false
-    @State private var isCanvasPinchPanning = false
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(WhiteboardPalette.panel)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .stroke(WhiteboardPalette.panelBorder, lineWidth: 1)
-                )
-                .shadow(color: WhiteboardPalette.ink.opacity(0.14), radius: 32, x: 0, y: 18)
+        CanvasGestureContainer(store: store, viewportSize: viewportSize) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .fill(WhiteboardPalette.panel)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 32, style: .continuous)
+                            .stroke(WhiteboardPalette.panelBorder, lineWidth: 1)
+                    )
+                    .shadow(color: WhiteboardPalette.ink.opacity(0.14), radius: 32, x: 0, y: 18)
 
-            WhiteboardGrid(offset: store.cameraOffset, zoom: store.zoom)
-                .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-                .gesture(panGesture)
-                .onTapGesture {
-                    guard store.tool == .select else {
-                        return
+                WhiteboardGrid(offset: store.cameraOffset, zoom: store.zoom)
+                    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                    .gesture(panGesture)
+                    .onTapGesture {
+                        guard store.tool == .select else {
+                            return
+                        }
+
+                        if store.editingItemID != nil {
+                            store.commitCurrentEditing(keepSelection: false)
+                        } else {
+                            store.selectItem(nil)
+                        }
                     }
 
-                    if store.editingItemID != nil {
-                        store.commitCurrentEditing(keepSelection: false)
-                    } else {
-                        store.selectItem(nil)
+                ZStack(alignment: .topLeading) {
+                    ForEach(store.items) { item in
+                        WhiteboardNoteCard(item: item, store: store, boardScale: store.zoom)
+                            .frame(width: item.size.width, height: item.size.height)
+                            .position(item.center.cgPoint)
                     }
                 }
-
-            ZStack(alignment: .topLeading) {
-                ForEach(store.items) { item in
-                    WhiteboardNoteCard(item: item, store: store, boardScale: store.zoom)
-                        .frame(width: item.size.width, height: item.size.height)
-                        .position(item.center.cgPoint)
-                }
-            }
-            .scaleEffect(store.zoom, anchor: .topLeading)
-            .offset(x: store.cameraOffset.width, y: store.cameraOffset.height)
-            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-
-            CanvasBadgeOverlay(store: store)
+                .scaleEffect(store.zoom, anchor: .topLeading)
+                .offset(x: store.cameraOffset.width, y: store.cameraOffset.height)
                 .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
 
-            if store.items.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "scribble.variable")
-                        .font(.system(size: 38, weight: .medium))
-                        .foregroundStyle(WhiteboardPalette.coral)
-                    Text("开始板书")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(WhiteboardPalette.ink)
-                    Text("点击工具栏文本按钮创建卡片，或按住底部麦克风开始本地转写。")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(WhiteboardPalette.inkMuted)
-                        .multilineTextAlignment(.center)
+                if !store.isInteracting {
+                    CanvasBadgeOverlay(store: store)
+                        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
                 }
-                .padding(28)
-                .background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .padding(.top, max(28, viewportSize.height * 0.18))
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                if store.items.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "scribble.variable")
+                            .font(.system(size: 38, weight: .medium))
+                            .foregroundStyle(WhiteboardPalette.coral)
+                        Text("开始板书")
+                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .foregroundStyle(WhiteboardPalette.ink)
+                        Text("点击工具栏文本按钮创建卡片，或按住底部麦克风开始本地转写。")
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundStyle(WhiteboardPalette.inkMuted)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(28)
+                    .background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .padding(.top, max(28, viewportSize.height * 0.18))
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .highPriorityGesture(zoomGesture, including: .all)
-        .simultaneousGesture(pinchPanGesture, including: .all)
     }
 
     private var panGesture: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
-                guard store.tool == .select, zoomOrigin == nil else {
+                guard store.tool == .select else {
                     return
                 }
 
                 if panOrigin == nil {
                     panOrigin = store.cameraOffset
-                    beginCanvasInteraction(kind: .pan)
+                    store.beginInteractiveChange()
                 }
 
                 let origin = panOrigin ?? store.cameraOffset
@@ -210,93 +205,151 @@ private struct WhiteboardCanvas: View {
             }
             .onEnded { _ in
                 panOrigin = nil
-                endCanvasInteraction(kind: .pan)
+                store.commitInteractiveChange()
             }
     }
+}
 
-    private var pinchPanGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                guard zoomOrigin != nil else {
-                    return
-                }
+private struct CanvasGestureContainer<Content: View>: UIViewRepresentable {
+    @ObservedObject var store: WhiteboardStore
+    let viewportSize: CGSize
+    let content: Content
 
-                if !isCanvasPinchPanning {
-                    beginCanvasInteraction(kind: .pinchPan)
-                }
+    init(store: WhiteboardStore, viewportSize: CGSize, @ViewBuilder content: () -> Content) {
+        self.store = store
+        self.viewportSize = viewportSize
+        self.content = content()
+    }
 
-                let delta = CGSize(
-                    width: value.translation.width - lastPinchPanTranslation.width,
-                    height: value.translation.height - lastPinchPanTranslation.height
-                )
+    func makeCoordinator() -> Coordinator {
+        Coordinator(store: store, viewportSize: viewportSize, rootView: content)
+    }
 
-                lastPinchPanTranslation = value.translation
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        let hostedView = context.coordinator.hostingController.view!
+        hostedView.backgroundColor = .clear
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hostedView)
+
+        NSLayoutConstraint.activate([
+            hostedView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: container.topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.delegate = context.coordinator
+        pinch.cancelsTouchesInView = false
+
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
+        pan.delegate = context.coordinator
+        pan.cancelsTouchesInView = false
+
+        container.addGestureRecognizer(pinch)
+        container.addGestureRecognizer(pan)
+        context.coordinator.pinchRecognizer = pinch
+        context.coordinator.panRecognizer = pan
+
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.store = store
+        context.coordinator.viewportSize = viewportSize
+        context.coordinator.hostingController.rootView = content
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var store: WhiteboardStore
+        var viewportSize: CGSize
+        let hostingController: UIHostingController<Content>
+
+        weak var pinchRecognizer: UIPinchGestureRecognizer?
+        weak var panRecognizer: UIPanGestureRecognizer?
+
+        private var lastPinchScale: CGFloat = 1
+        private var lastPanTranslation: CGPoint = .zero
+        private var isPinching = false
+        private var isPanning = false
+
+        init(store: WhiteboardStore, viewportSize: CGSize, rootView: Content) {
+            self.store = store
+            self.viewportSize = viewportSize
+            hostingController = UIHostingController(rootView: rootView)
+            super.init()
+        }
+
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                isPinching = true
+                lastPinchScale = recognizer.scale
+                beginInteractionIfNeeded()
+
+            case .changed:
+                let deltaScale = recognizer.scale / max(lastPinchScale, 0.0001)
+                lastPinchScale = recognizer.scale
+                let anchor = recognizer.location(in: recognizer.view)
+                store.setZoom(store.zoom * deltaScale, anchoredAt: anchor)
+
+            case .ended, .cancelled, .failed:
+                lastPinchScale = 1
+                isPinching = false
+                endInteractionIfNeeded()
+
+            default:
+                break
+            }
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                isPanning = true
+                lastPanTranslation = recognizer.translation(in: recognizer.view)
+                beginInteractionIfNeeded()
+
+            case .changed:
+                let translation = recognizer.translation(in: recognizer.view)
+                let delta = CGPoint(x: translation.x - lastPanTranslation.x, y: translation.y - lastPanTranslation.y)
+                lastPanTranslation = translation
                 store.setCameraOffset(
                     CGSize(
-                        width: store.cameraOffset.width + delta.width,
-                        height: store.cameraOffset.height + delta.height
+                        width: store.cameraOffset.width + delta.x,
+                        height: store.cameraOffset.height + delta.y
                     )
                 )
+
+            case .ended, .cancelled, .failed:
+                lastPanTranslation = .zero
+                isPanning = false
+                endInteractionIfNeeded()
+
+            default:
+                break
             }
-            .onEnded { _ in
-                lastPinchPanTranslation = .zero
-                endCanvasInteraction(kind: .pinchPan)
-            }
-    }
-
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                if zoomOrigin == nil {
-                    zoomOrigin = store.zoom
-                    beginCanvasInteraction(kind: .zoom)
-                }
-
-                let anchor = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
-                store.setZoom((zoomOrigin ?? store.zoom) * value, anchoredAt: anchor)
-            }
-            .onEnded { _ in
-                zoomOrigin = nil
-                lastPinchPanTranslation = .zero
-                endCanvasInteraction(kind: .zoom)
-            }
-    }
-
-    private enum CanvasInteractionKind {
-        case pan
-        case zoom
-        case pinchPan
-    }
-
-    private func beginCanvasInteraction(kind: CanvasInteractionKind) {
-        let wasIdle = !(isCanvasPanning || isCanvasZooming || isCanvasPinchPanning)
-
-        switch kind {
-        case .pan:
-            isCanvasPanning = true
-        case .zoom:
-            isCanvasZooming = true
-        case .pinchPan:
-            isCanvasPinchPanning = true
         }
 
-        if wasIdle {
-            store.beginInteractiveChange()
-        }
-    }
-
-    private func endCanvasInteraction(kind: CanvasInteractionKind) {
-        switch kind {
-        case .pan:
-            isCanvasPanning = false
-        case .zoom:
-            isCanvasZooming = false
-        case .pinchPan:
-            isCanvasPinchPanning = false
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
 
-        if !(isCanvasPanning || isCanvasZooming || isCanvasPinchPanning) {
-            store.commitInteractiveChange()
+        private func beginInteractionIfNeeded() {
+            if !store.isInteracting {
+                store.beginInteractiveChange()
+            }
+        }
+
+        private func endInteractionIfNeeded() {
+            if !(isPinching || isPanning) {
+                store.commitInteractiveChange()
+            }
         }
     }
 }
@@ -308,6 +361,7 @@ private struct WhiteboardNoteCard: View {
 
     @State private var dragOrigin: CGPoint?
     @State private var resizeOrigin: CGSize?
+    @State private var cachedLayout: TextLayoutResult?
     @FocusState private var isTextEditorFocused: Bool
 
     init(item: WhiteboardTextCard, store: WhiteboardStore, boardScale: CGFloat) {
@@ -325,12 +379,11 @@ private struct WhiteboardNoteCard: View {
     }
 
     private var layout: TextLayoutResult {
-        TextLayoutEngine.layout(
-            text: item.text,
-            cardWidth: item.size.width,
-            fontSize: item.fontSize,
-            lineHeight: item.lineHeight
-        )
+        cachedLayout ?? resolvedLayout()
+    }
+
+    private var layoutKey: CardLayoutKey {
+        CardLayoutKey(text: item.text, cardWidth: item.size.width, fontSize: item.fontSize, lineHeight: item.lineHeight)
     }
 
     private var noteBackgroundColor: Color {
@@ -452,7 +505,10 @@ private struct WhiteboardNoteCard: View {
             if isSelected && store.tool == .select {
                 if !isEditing {
                     resizeHandleHitTarget
-                        .offset(x: item.size.width - 20, y: item.size.height - 20)
+                        .position(
+                            x: max(22, item.size.width - 22),
+                            y: max(22, item.size.height - 22)
+                        )
                         .highPriorityGesture(resizeGesture)
                 }
             }
@@ -485,6 +541,12 @@ private struct WhiteboardNoteCard: View {
             }
 
             store.commitCurrentEditing()
+        }
+        .onAppear {
+            updateLayoutCache()
+        }
+        .onChange(of: layoutKey) { _, _ in
+            updateLayoutCache()
         }
     }
 
@@ -565,13 +627,33 @@ private struct WhiteboardNoteCard: View {
             Circle()
                 .fill(Color.clear)
                 .frame(
-                    width: max(44, 60 / max(boardScale, 0.1)),
-                    height: max(44, 60 / max(boardScale, 0.1))
+                    width: max(44, 48 / max(boardScale, 0.1)),
+                    height: max(44, 48 / max(boardScale, 0.1))
                 )
 
             ResizeHandle(boardScale: boardScale)
         }
         .contentShape(Rectangle())
+    }
+
+    private func resolvedLayout() -> TextLayoutResult {
+        TextLayoutEngine.layout(
+            text: item.text,
+            cardWidth: item.size.width,
+            fontSize: item.fontSize,
+            lineHeight: item.lineHeight
+        )
+    }
+
+    private func updateLayoutCache() {
+        cachedLayout = resolvedLayout()
+    }
+
+    private struct CardLayoutKey: Equatable {
+        let text: String
+        let cardWidth: CGFloat
+        let fontSize: CGFloat
+        let lineHeight: CGFloat
     }
 }
 

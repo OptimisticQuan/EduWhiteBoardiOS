@@ -14,6 +14,7 @@ final class WhiteboardStore: ObservableObject {
     @Published var toasts: [ToastMessage]
     @Published var isHelpPresented = false
     @Published var clearConfirmArmed = false
+    @Published private(set) var isInteracting = false
 
     private var highlightCursor: Int
     private var undoStack: [WhiteboardDocument] = []
@@ -35,6 +36,7 @@ final class WhiteboardStore: ObservableObject {
             toasts = []
             highlightCursor = document.highlightCursor
             hasConfiguredViewport = true
+            isInteracting = false
         } else {
             items = []
             selectedItemID = nil
@@ -45,6 +47,7 @@ final class WhiteboardStore: ObservableObject {
             zoom = 1
             toasts = []
             highlightCursor = 0
+            isInteracting = false
         }
     }
 
@@ -236,6 +239,7 @@ final class WhiteboardStore: ObservableObject {
     func beginInteractiveChange() {
         if interactiveSnapshot == nil {
             interactiveSnapshot = currentDocument()
+            isInteracting = true
         }
     }
 
@@ -245,6 +249,7 @@ final class WhiteboardStore: ObservableObject {
         }
 
         interactiveSnapshot = nil
+        isInteracting = false
         commitSnapshotIfNeeded(snapshot)
     }
 
@@ -254,6 +259,7 @@ final class WhiteboardStore: ObservableObject {
         }
 
         interactiveSnapshot = nil
+        isInteracting = false
         apply(document: snapshot)
         persist()
     }
@@ -473,6 +479,7 @@ final class WhiteboardStore: ObservableObject {
         zoom = document.zoom.clamped(to: WhiteboardConstants.minZoom...WhiteboardConstants.maxZoom)
         highlightCursor = document.highlightCursor
         clearConfirmArmed = false
+        isInteracting = false
         tool = .select
     }
 
