@@ -153,6 +153,12 @@ private struct WhiteboardCanvas: View {
                 .offset(x: store.cameraOffset.width, y: store.cameraOffset.height)
                 .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
 
+                if store.tool == .erase {
+                    CanvasEraseOverlay(store: store, isEnabled: !store.isMultiTouchActive)
+                        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                        .zIndex(30)
+                }
+
                 if !store.isInteracting {
                     CanvasBadgeOverlay(store: store)
                         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -181,12 +187,20 @@ private struct WhiteboardCanvas: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         }
+        .onChange(of: store.isMultiTouchActive) { _, isMultiTouchActive in
+            guard isMultiTouchActive, panOrigin != nil else {
+                return
+            }
+
+            panOrigin = nil
+            store.cancelInteractiveChange()
+        }
     }
 
     private var panGesture: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
-                guard store.tool == .select else {
+                guard store.tool == .select, !store.isMultiTouchActive else {
                     return
                 }
 
@@ -251,8 +265,16 @@ private struct CanvasGestureContainer<Content: View>: UIViewRepresentable {
         pan.delegate = context.coordinator
         pan.cancelsTouchesInView = false
 
+        let touchCounter = TouchCountGestureRecognizer()
+        touchCounter.delegate = context.coordinator
+        touchCounter.cancelsTouchesInView = false
+        touchCounter.touchCountChanged = { [weak coordinator = context.coordinator] count in
+            coordinator?.store.setActiveTouchCount(count)
+        }
+
         container.addGestureRecognizer(pinch)
         container.addGestureRecognizer(pan)
+        container.addGestureRecognizer(touchCounter)
         context.coordinator.pinchRecognizer = pinch
         context.coordinator.panRecognizer = pan
 
@@ -352,6 +374,57 @@ private struct CanvasGestureContainer<Content: View>: UIViewRepresentable {
             }
         }
     }
+
+    final class TouchCountGestureRecognizer: UIGestureRecognizer {
+        var touchCountChanged: ((Int) -> Void)?
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            super.touchesBegan(touches, with: event)
+            state = .began
+            publishTouchCount(for: event)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            super.touchesMoved(touches, with: event)
+            state = .changed
+            publishTouchCount(for: event)
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            super.touchesEnded(touches, with: event)
+            publishTouchCount(for: event)
+            state = activeTouchCount(in: event) == 0 ? .ended : .changed
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            super.touchesCancelled(touches, with: event)
+            publishTouchCount(for: event)
+            state = .cancelled
+        }
+
+        override func reset() {
+            super.reset()
+            touchCountChanged?(0)
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        private func publishTouchCount(for event: UIEvent?) {
+            touchCountChanged?(activeTouchCount(in: event))
+        }
+
+        private func activeTouchCount(in event: UIEvent?) -> Int {
+            event?.allTouches?.filter { touch in
+                touch.phase != .ended && touch.phase != .cancelled
+            }.count ?? 0
+        }
+    }
 }
 
 private struct WhiteboardNoteCard: View {
@@ -406,13 +479,26 @@ private struct WhiteboardNoteCard: View {
         return .clear
     }
 
-    @ViewBuilder
     var body: some View {
-        if store.tool == .select {
-            noteContent
-                .gesture(moveGesture)
-        } else {
-            noteContent
+        Group {
+            if store.tool == .select {
+                noteContent
+                    .gesture(moveGesture)
+            } else {
+                noteContent
+            }
+        }
+        .allowsHitTesting(!store.isMultiTouchActive)
+        .onChange(of: store.isMultiTouchActive) { _, isMultiTouchActive in
+            guard isMultiTouchActive else {
+                return
+            }
+
+            if dragOrigin != nil || resizeOrigin != nil {
+                dragOrigin = nil
+                resizeOrigin = nil
+                store.cancelInteractiveChange()
+            }
         }
     }
 
@@ -477,7 +563,7 @@ private struct WhiteboardNoteCard: View {
             }
 
             if store.tool == .highlight {
-                StrokeCaptureOverlay(color: store.modeColor, lineWidth: max(12, 24 / max(boardScale, 0.1))) { points in
+                StrokeCaptureOverlay(color: store.modeColor, lineWidth: max(12, 24 / max(boardScale, 0.1)), isEnabled: !store.isMultiTouchActive) { points in
                     let hitIndexes = TextLayoutEngine.strokeSelectionIndexes(
                         points: points,
                         boxes: layout.characterBoxes,
@@ -489,15 +575,6 @@ private struct WhiteboardNoteCard: View {
                     }
 
                     store.createAnnotation(on: item.id, start: start, end: end + 1)
-                }
-                .zIndex(20)
-            } else if store.tool == .erase {
-                StrokeCaptureOverlay(color: WhiteboardPalette.ink.opacity(0.48), lineWidth: max(6, 18 / max(boardScale, 0.1)), dashed: true) { points in
-                    guard TextLayoutEngine.strokeIntersectsRect(points: points, rect: CGRect(origin: .zero, size: item.size.cgSize), padding: 2) else {
-                        return
-                    }
-
-                    store.deleteItem(item.id)
                 }
                 .zIndex(20)
             }
@@ -565,7 +642,7 @@ private struct WhiteboardNoteCard: View {
     private var moveGesture: some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
-                guard store.tool == .select, !isEditing, resizeOrigin == nil else {
+                guard store.tool == .select, !store.isMultiTouchActive, !isEditing, resizeOrigin == nil else {
                     return
                 }
 
@@ -595,7 +672,7 @@ private struct WhiteboardNoteCard: View {
     private var resizeGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
-                guard store.tool == .select, isSelected, !isEditing else {
+                guard store.tool == .select, !store.isMultiTouchActive, isSelected, !isEditing else {
                     return
                 }
 
@@ -657,10 +734,27 @@ private struct WhiteboardNoteCard: View {
     }
 }
 
+private struct CanvasEraseOverlay: View {
+    @ObservedObject var store: WhiteboardStore
+    let isEnabled: Bool
+
+    var body: some View {
+        StrokeCaptureOverlay(
+            color: WhiteboardPalette.ink.opacity(0.48),
+            lineWidth: max(6, 18 / max(store.zoom, 0.1)),
+            dashed: true,
+            isEnabled: isEnabled
+        ) { points in
+            store.eraseItems(alongScreenStroke: points)
+        }
+    }
+}
+
 private struct StrokeCaptureOverlay: View {
     let color: Color
     let lineWidth: CGFloat
     var dashed = false
+    var isEnabled = true
     let onCommit: ([CGPoint]) -> Void
 
     @State private var points: [CGPoint] = []
@@ -673,6 +767,10 @@ private struct StrokeCaptureOverlay: View {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                guard isEnabled else {
+                                    return
+                                }
+
                                 if points.isEmpty {
                                     points = [value.location]
                                 } else {
@@ -682,6 +780,11 @@ private struct StrokeCaptureOverlay: View {
                             .onEnded { _ in
                                 let committedPoints = points
                                 points = []
+
+                                guard isEnabled, !committedPoints.isEmpty else {
+                                    return
+                                }
+
                                 onCommit(committedPoints)
                             }
                     )
@@ -704,6 +807,12 @@ private struct StrokeCaptureOverlay: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(isEnabled)
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled {
+                    points = []
+                }
+            }
         }
     }
 }

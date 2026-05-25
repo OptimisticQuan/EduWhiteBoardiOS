@@ -15,6 +15,7 @@ final class WhiteboardStore: ObservableObject {
     @Published var isHelpPresented = false
     @Published var clearConfirmArmed = false
     @Published private(set) var isInteracting = false
+    @Published private(set) var activeTouchCount = 0
 
     private var highlightCursor: Int
     private var undoStack: [WhiteboardDocument] = []
@@ -37,6 +38,7 @@ final class WhiteboardStore: ObservableObject {
             highlightCursor = document.highlightCursor
             hasConfiguredViewport = true
             isInteracting = false
+            activeTouchCount = 0
         } else {
             items = []
             selectedItemID = nil
@@ -48,6 +50,7 @@ final class WhiteboardStore: ObservableObject {
             toasts = []
             highlightCursor = 0
             isInteracting = false
+            activeTouchCount = 0
         }
     }
 
@@ -58,6 +61,10 @@ final class WhiteboardStore: ObservableObject {
 
     var canUndo: Bool {
         !undoStack.isEmpty
+    }
+
+    var isMultiTouchActive: Bool {
+        activeTouchCount > 1
     }
 
     var canRedo: Bool {
@@ -236,6 +243,42 @@ final class WhiteboardStore: ObservableObject {
         }
     }
 
+    func eraseItems(alongScreenStroke points: [CGPoint]) {
+        guard !points.isEmpty else {
+            return
+        }
+
+        let boardPoints = points.map(boardPoint(atScreenPoint:))
+        let hitIDs = Set(items.compactMap { item -> UUID? in
+            let rect = CGRect(
+                x: item.center.x - item.size.width / 2,
+                y: item.center.y - item.size.height / 2,
+                width: item.size.width,
+                height: item.size.height
+            )
+
+            return TextLayoutEngine.strokeIntersectsRect(points: boardPoints, rect: rect, padding: 2) ? item.id : nil
+        })
+
+        guard !hitIDs.isEmpty else {
+            return
+        }
+
+        performRecordedChange {
+            items.removeAll { hitIDs.contains($0.id) }
+
+            if let selectedItemID, hitIDs.contains(selectedItemID) {
+                self.selectedItemID = nil
+            }
+
+            if let editingItemID, hitIDs.contains(editingItemID) {
+                self.editingItemID = nil
+                editingText = ""
+            }
+
+            clearConfirmArmed = false
+        }
+    }
     func beginInteractiveChange() {
         if interactiveSnapshot == nil {
             interactiveSnapshot = currentDocument()
@@ -262,6 +305,10 @@ final class WhiteboardStore: ObservableObject {
         isInteracting = false
         apply(document: snapshot)
         persist()
+    }
+
+    func setActiveTouchCount(_ count: Int) {
+        activeTouchCount = max(0, count)
     }
 
     func moveItem(_ itemID: UUID, to center: CGPoint) {
@@ -480,6 +527,7 @@ final class WhiteboardStore: ObservableObject {
         highlightCursor = document.highlightCursor
         clearConfirmArmed = false
         isInteracting = false
+        activeTouchCount = 0
         tool = .select
     }
 
