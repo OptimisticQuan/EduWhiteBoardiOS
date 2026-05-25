@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要麦克风权限来录制讲解内容并在白板上生成文本。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>需要语音识别权限来将口述内容实时转写为白板文本。</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>MaShanZheng-Regular.ttf</string>
+		<string>ShantellSans-Variable.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
