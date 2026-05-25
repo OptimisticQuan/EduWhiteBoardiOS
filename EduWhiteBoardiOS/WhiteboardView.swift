@@ -31,6 +31,7 @@ struct WhiteboardScreen: View {
             let horizontalInset = WhiteboardScreenLayout.horizontalInset(for: proxy.size.width)
             let contentWidth = max(1, proxy.size.width - horizontalInset * 2)
             let contentHeight = max(1, proxy.size.height - WhiteboardScreenLayout.verticalSpacing)
+            let stackSpacing = max(4, WhiteboardScreenLayout.verticalSpacing - 2)
             let activeCanvasSize = canvasViewportSize.width > 0 && canvasViewportSize.height > 0
                 ? canvasViewportSize
                 : CGSize(width: contentWidth, height: contentHeight)
@@ -39,7 +40,7 @@ struct WhiteboardScreen: View {
                 WhiteboardBackdrop()
                     .ignoresSafeArea()
 
-                VStack(spacing: WhiteboardScreenLayout.verticalSpacing) {
+                VStack(spacing: stackSpacing) {
                     ToolbarStrip(store: store, viewportSize: activeCanvasSize)
                         .frame(width: contentWidth)
 
@@ -72,8 +73,11 @@ struct WhiteboardScreen: View {
                         .padding(.bottom, WhiteboardScreenLayout.voiceBottomInset)
                     }
                     .overlay(alignment: .top) {
-                        ToastOverlay(messages: store.toasts)
-                            .padding(.top, WhiteboardScreenLayout.verticalSpacing)
+                        VStack(spacing: WhiteboardScreenLayout.verticalSpacing) {
+                            ModeStatusBadge(color: store.modeColor, label: store.modeLabel)
+                            ToastOverlay(messages: store.toasts)
+                        }
+                        .padding(.top, WhiteboardScreenLayout.verticalSpacing)
                     }
                 }
                 .frame(width: contentWidth, height: contentHeight, alignment: .top)
@@ -94,7 +98,6 @@ struct WhiteboardScreen: View {
                 store.configureInitialViewport(size: newSize)
             }
         }
-        .ignoresSafeArea(.container, edges: .bottom)
     }
 
     private func updateCanvasViewportSize(_ size: CGSize) {
@@ -734,73 +737,78 @@ private struct ToolbarStrip: View {
     let viewportSize: CGSize
 
     var body: some View {
-        VStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ToolbarButton(label: "选择", systemImage: "cursorarrow", active: store.tool == .select) {
-                        store.setTool(.select)
-                    }
-                    ToolbarButton(label: "高亮", systemImage: "highlighter", active: store.tool == .highlight, accent: true) {
-                        store.setTool(.highlight)
-                    }
-                    ToolbarButton(label: "橡皮擦", systemImage: "eraser", active: store.tool == .erase, accent: true) {
-                        store.setTool(.erase)
-                    }
-                    ToolbarButton(label: "文本", systemImage: "text.cursor") {
-                        store.createManualText(in: viewportSize)
-                    }
-                    ToolbarButton(label: store.clearConfirmArmed ? "确认清空" : "清空", systemImage: "trash", active: store.clearConfirmArmed, accent: true) {
-                        switch store.requestClearCanvas() {
-                        case .armed:
-                            store.showToast("再点一次清空画布")
-                        case .alreadyEmpty:
-                            store.showToast("画布已空")
-                        case .cleared:
-                            store.showToast("已清空画布")
-                        }
-                    }
-                    Divider()
-                        .frame(height: 18)
-                    ToolbarButton(label: "撤销", systemImage: "arrow.uturn.backward", disabled: !store.canUndo) {
-                        store.undo()
-                    }
-                    ToolbarButton(label: "重做", systemImage: "arrow.uturn.forward", disabled: !store.canRedo) {
-                        store.redo()
-                    }
-                    ToolbarButton(label: "帮助", systemImage: "questionmark.circle") {
-                        store.isHelpPresented = true
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ToolbarButton(label: "选择", systemImage: "cursorarrow", active: store.tool == .select) {
+                    store.setTool(.select)
+                }
+                ToolbarButton(label: "高亮", systemImage: "highlighter", active: store.tool == .highlight, accent: true) {
+                    store.setTool(.highlight)
+                }
+                ToolbarButton(label: "橡皮擦", systemImage: "eraser", active: store.tool == .erase, accent: true) {
+                    store.setTool(.erase)
+                }
+                ToolbarButton(label: "文本", systemImage: "text.cursor") {
+                    store.createManualText(in: viewportSize)
+                }
+                ToolbarButton(label: store.clearConfirmArmed ? "确认清空" : "清空", systemImage: "trash", active: store.clearConfirmArmed, accent: true) {
+                    switch store.requestClearCanvas() {
+                    case .armed:
+                        store.showToast("再点一次清空画布")
+                    case .alreadyEmpty:
+                        store.showToast("画布已空")
+                    case .cleared:
+                        store.showToast("已清空画布")
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(WhiteboardPalette.panelBorder, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: WhiteboardPalette.ink.opacity(0.12), radius: 18, x: 0, y: 10)
-
-            HStack {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(store.modeColor)
-                        .frame(width: 8, height: 8)
-                    Text(store.modeLabel)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(WhiteboardPalette.inkMuted)
+                Divider()
+                    .frame(height: 18)
+                ToolbarButton(label: "撤销", systemImage: "arrow.uturn.backward", disabled: !store.canUndo) {
+                    store.undo()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.white.opacity(0.74), in: Capsule())
+                ToolbarButton(label: "重做", systemImage: "arrow.uturn.forward", disabled: !store.canRedo) {
+                    store.redo()
+                }
+                ToolbarButton(label: "帮助", systemImage: "questionmark.circle") {
+                    store.isHelpPresented = true
+                }
             }
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(WhiteboardPalette.panelBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: WhiteboardPalette.ink.opacity(0.12), radius: 18, x: 0, y: 10)
         .frame(maxWidth: .infinity)
         .clipped()
+    }
+}
+
+private struct ModeStatusBadge: View {
+    let color: Color
+    let label: String
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(WhiteboardPalette.inkMuted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.74), in: Capsule())
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
