@@ -159,12 +159,13 @@ enum WhiteboardPalette {
 
 enum WhiteboardConstants {
     static let textPadding: CGFloat = 20
-    static let defaultCardWidth: CGFloat = 420
-    static let defaultCardHeight: CGFloat = 132
-    static let minimumCardWidth: CGFloat = 240
-    static let minimumCardHeight: CGFloat = 96
     static let defaultFontSize: CGFloat = 32
     static let defaultLineHeight: CGFloat = 1.38
+    static let defaultCardWidth: CGFloat = 420
+    static let minimumCardWidth: CGFloat = 240
+    static let singleLineCardHeight = ceil(defaultFontSize * defaultLineHeight + textPadding * 2 + 8)
+    static let defaultCardHeight: CGFloat = singleLineCardHeight
+    static let minimumCardHeight: CGFloat = singleLineCardHeight
     static let minZoom: CGFloat = 0.55
     static let maxZoom: CGFloat = 2.8
     static let markHitPadding: CGFloat = 6

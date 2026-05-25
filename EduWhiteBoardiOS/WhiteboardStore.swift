@@ -169,7 +169,7 @@ final class WhiteboardStore: ObservableObject {
     }
 
     func createManualText(in viewportSize: CGSize) {
-        createText(text: "", in: viewportSize, editImmediately: true, preferredSize: CGSize(width: WhiteboardConstants.defaultCardWidth, height: WhiteboardConstants.defaultCardHeight))
+        createText(text: "", in: viewportSize, editImmediately: true, preferredSize: defaultManualCardSize())
     }
 
     func createTextFromAsr(_ rawText: String, in viewportSize: CGSize) {
@@ -263,7 +263,9 @@ final class WhiteboardStore: ObservableObject {
             return
         }
 
-        items[index].center = BoardPoint(center)
+        var nextItems = items
+        nextItems[index].center = BoardPoint(center)
+        items = nextItems
     }
 
     func resizeItem(_ itemID: UUID, to size: CGSize) {
@@ -271,10 +273,12 @@ final class WhiteboardStore: ObservableObject {
             return
         }
 
-        items[index].size = BoardSize(
+        var nextItems = items
+        nextItems[index].size = BoardSize(
             width: max(WhiteboardConstants.minimumCardWidth, size.width),
             height: max(WhiteboardConstants.minimumCardHeight, size.height)
         )
+        items = nextItems
     }
 
     func createAnnotation(on itemID: UUID, start: Int, end: Int) {
@@ -362,7 +366,6 @@ final class WhiteboardStore: ObservableObject {
 
     func setCameraOffset(_ offset: CGSize) {
         cameraOffset = offset
-        persist()
     }
 
     func setZoom(_ nextZoom: CGFloat, anchoredAt screenPoint: CGPoint) {
@@ -371,7 +374,6 @@ final class WhiteboardStore: ObservableObject {
         let boardY = (screenPoint.y - cameraOffset.height) / max(zoom, 0.01)
         zoom = clampedZoom
         cameraOffset = CGSize(width: screenPoint.x - boardX * clampedZoom, height: screenPoint.y - boardY * clampedZoom)
-        persist()
     }
 
     func showToast(_ message: String) {
@@ -411,6 +413,18 @@ final class WhiteboardStore: ObservableObject {
             tool = .select
             clearConfirmArmed = false
         }
+    }
+
+    private func defaultManualCardSize() -> CGSize {
+        let width = WhiteboardConstants.defaultCardWidth
+        let layout = TextLayoutEngine.layout(
+            text: "",
+            cardWidth: width,
+            fontSize: WhiteboardConstants.defaultFontSize,
+            lineHeight: WhiteboardConstants.defaultLineHeight
+        )
+
+        return CGSize(width: width, height: layout.contentHeight)
     }
 
     private func boardPoint(atScreenPoint point: CGPoint) -> CGPoint {

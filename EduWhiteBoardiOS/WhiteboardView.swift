@@ -117,6 +117,11 @@ private struct WhiteboardCanvas: View {
     @Binding var panOrigin: CGSize?
     @Binding var zoomOrigin: CGFloat?
 
+    @State private var lastPinchPanTranslation: CGSize = .zero
+    @State private var isCanvasPanning = false
+    @State private var isCanvasZooming = false
+    @State private var isCanvasPinchPanning = false
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 32, style: .continuous)
@@ -131,7 +136,6 @@ private struct WhiteboardCanvas: View {
                 .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
                 .gesture(panGesture)
-                .simultaneousGesture(zoomGesture)
                 .onTapGesture {
                     guard store.tool == .select else {
                         return
@@ -179,17 +183,21 @@ private struct WhiteboardCanvas: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .highPriorityGesture(zoomGesture, including: .all)
+        .simultaneousGesture(pinchPanGesture, including: .all)
     }
 
     private var panGesture: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
-                guard store.tool == .select else {
+                guard store.tool == .select, zoomOrigin == nil else {
                     return
                 }
 
                 if panOrigin == nil {
                     panOrigin = store.cameraOffset
+                    beginCanvasInteraction(kind: .pan)
                 }
 
                 let origin = panOrigin ?? store.cameraOffset
@@ -202,6 +210,37 @@ private struct WhiteboardCanvas: View {
             }
             .onEnded { _ in
                 panOrigin = nil
+                endCanvasInteraction(kind: .pan)
+            }
+    }
+
+    private var pinchPanGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard zoomOrigin != nil else {
+                    return
+                }
+
+                if !isCanvasPinchPanning {
+                    beginCanvasInteraction(kind: .pinchPan)
+                }
+
+                let delta = CGSize(
+                    width: value.translation.width - lastPinchPanTranslation.width,
+                    height: value.translation.height - lastPinchPanTranslation.height
+                )
+
+                lastPinchPanTranslation = value.translation
+                store.setCameraOffset(
+                    CGSize(
+                        width: store.cameraOffset.width + delta.width,
+                        height: store.cameraOffset.height + delta.height
+                    )
+                )
+            }
+            .onEnded { _ in
+                lastPinchPanTranslation = .zero
+                endCanvasInteraction(kind: .pinchPan)
             }
     }
 
@@ -210,6 +249,7 @@ private struct WhiteboardCanvas: View {
             .onChanged { value in
                 if zoomOrigin == nil {
                     zoomOrigin = store.zoom
+                    beginCanvasInteraction(kind: .zoom)
                 }
 
                 let anchor = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
@@ -217,7 +257,47 @@ private struct WhiteboardCanvas: View {
             }
             .onEnded { _ in
                 zoomOrigin = nil
+                lastPinchPanTranslation = .zero
+                endCanvasInteraction(kind: .zoom)
             }
+    }
+
+    private enum CanvasInteractionKind {
+        case pan
+        case zoom
+        case pinchPan
+    }
+
+    private func beginCanvasInteraction(kind: CanvasInteractionKind) {
+        let wasIdle = !(isCanvasPanning || isCanvasZooming || isCanvasPinchPanning)
+
+        switch kind {
+        case .pan:
+            isCanvasPanning = true
+        case .zoom:
+            isCanvasZooming = true
+        case .pinchPan:
+            isCanvasPinchPanning = true
+        }
+
+        if wasIdle {
+            store.beginInteractiveChange()
+        }
+    }
+
+    private func endCanvasInteraction(kind: CanvasInteractionKind) {
+        switch kind {
+        case .pan:
+            isCanvasPanning = false
+        case .zoom:
+            isCanvasZooming = false
+        case .pinchPan:
+            isCanvasPinchPanning = false
+        }
+
+        if !(isCanvasPanning || isCanvasZooming || isCanvasPinchPanning) {
+            store.commitInteractiveChange()
+        }
     }
 }
 
@@ -228,6 +308,7 @@ private struct WhiteboardNoteCard: View {
 
     @State private var dragOrigin: CGPoint?
     @State private var resizeOrigin: CGSize?
+    @FocusState private var isTextEditorFocused: Bool
 
     init(item: WhiteboardTextCard, store: WhiteboardStore, boardScale: CGFloat) {
         self.item = item
@@ -276,7 +357,7 @@ private struct WhiteboardNoteCard: View {
     var body: some View {
         if store.tool == .select {
             noteContent
-                .highPriorityGesture(moveGesture)
+                .gesture(moveGesture)
         } else {
             noteContent
         }
@@ -314,6 +395,7 @@ private struct WhiteboardNoteCard: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 14)
                     .background(Color.clear)
+                    .focused($isTextEditorFocused)
 
                 if store.editingText.isEmpty {
                     Text("输入文本...")
@@ -368,31 +450,41 @@ private struct WhiteboardNoteCard: View {
             }
 
             if isSelected && store.tool == .select {
-                NoteActionStrip(isEditing: isEditing) {
-                    store.cancelEditing()
-                } onConfirm: {
-                    store.commitCurrentEditing()
-                } onEdit: {
-                    store.beginEditing(item.id)
-                } onDelete: {
-                    store.deleteItem(item.id)
-                }
-                .offset(x: item.size.width - 112, y: -14)
-
                 if !isEditing {
-                    ResizeHandle(boardScale: boardScale)
+                    resizeHandleHitTarget
                         .offset(x: item.size.width - 20, y: item.size.height - 20)
-                        .gesture(resizeGesture)
+                        .highPriorityGesture(resizeGesture)
                 }
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onTapGesture(count: 2) {
+            guard store.tool == .select else {
+                return
+            }
+
+            store.beginEditing(item.id)
+        }
         .onTapGesture {
             guard store.tool == .select else {
                 return
             }
 
             store.selectItem(item.id)
+        }
+        .onChange(of: isEditing) { _, editing in
+            if editing {
+                isTextEditorFocused = true
+            } else {
+                isTextEditorFocused = false
+            }
+        }
+        .onChange(of: isTextEditorFocused) { _, focused in
+            guard !focused, isEditing else {
+                return
+            }
+
+            store.commitCurrentEditing()
         }
     }
 
@@ -411,11 +503,12 @@ private struct WhiteboardNoteCard: View {
     private var moveGesture: some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
-                guard store.tool == .select, isSelected, !isEditing else {
+                guard store.tool == .select, !isEditing, resizeOrigin == nil else {
                     return
                 }
 
                 if dragOrigin == nil {
+                    store.selectItem(item.id)
                     dragOrigin = item.center.cgPoint
                     store.beginInteractiveChange()
                 }
@@ -445,6 +538,7 @@ private struct WhiteboardNoteCard: View {
                 }
 
                 if resizeOrigin == nil {
+                    store.selectItem(item.id)
                     resizeOrigin = item.size.cgSize
                     store.beginInteractiveChange()
                 }
@@ -464,6 +558,20 @@ private struct WhiteboardNoteCard: View {
                     store.commitInteractiveChange()
                 }
             }
+    }
+
+    private var resizeHandleHitTarget: some View {
+        ZStack {
+            Circle()
+                .fill(Color.clear)
+                .frame(
+                    width: max(44, 60 / max(boardScale, 0.1)),
+                    height: max(44, 60 / max(boardScale, 0.1))
+                )
+
+            ResizeHandle(boardScale: boardScale)
+        }
+        .contentShape(Rectangle())
     }
 }
 
