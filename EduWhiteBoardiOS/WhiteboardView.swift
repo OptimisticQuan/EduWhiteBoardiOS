@@ -28,9 +28,11 @@ struct WhiteboardScreen: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let safeInsets = proxy.safeAreaInsets
             let horizontalInset = WhiteboardScreenLayout.horizontalInset(for: proxy.size.width)
             let contentWidth = max(1, proxy.size.width - horizontalInset * 2)
-            let contentHeight = max(1, proxy.size.height - WhiteboardScreenLayout.verticalSpacing)
+            let canvasBottomLift = min(max(safeInsets.bottom - 4, 0), 12)
+            let contentHeight = max(1, proxy.size.height - WhiteboardScreenLayout.verticalSpacing + canvasBottomLift)
             let stackSpacing = max(4, WhiteboardScreenLayout.verticalSpacing - 2)
             let activeCanvasSize = canvasViewportSize.width > 0 && canvasViewportSize.height > 0
                 ? canvasViewportSize
@@ -70,7 +72,7 @@ struct WhiteboardScreen: View {
                         } onToast: { message in
                             store.showToast(message)
                         }
-                        .padding(.bottom, WhiteboardScreenLayout.voiceBottomInset)
+                        .padding(.bottom, WhiteboardScreenLayout.voiceBottomInset + canvasBottomLift)
                     }
                     .overlay(alignment: .top) {
                         VStack(spacing: WhiteboardScreenLayout.verticalSpacing) {
@@ -736,57 +738,62 @@ private struct ToolbarStrip: View {
     @ObservedObject var store: WhiteboardStore
     let viewportSize: CGSize
 
+    private let cornerRadius: CGFloat = 24
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ToolbarButton(label: "选择", systemImage: "cursorarrow", active: store.tool == .select) {
-                    store.setTool(.select)
-                }
-                ToolbarButton(label: "高亮", systemImage: "highlighter", active: store.tool == .highlight, accent: true) {
-                    store.setTool(.highlight)
-                }
-                ToolbarButton(label: "橡皮擦", systemImage: "eraser", active: store.tool == .erase, accent: true) {
-                    store.setTool(.erase)
-                }
-                ToolbarButton(label: "文本", systemImage: "text.cursor") {
-                    store.createManualText(in: viewportSize)
-                }
-                ToolbarButton(label: store.clearConfirmArmed ? "确认清空" : "清空", systemImage: "trash", active: store.clearConfirmArmed, accent: true) {
-                    switch store.requestClearCanvas() {
-                    case .armed:
-                        store.showToast("再点一次清空画布")
-                    case .alreadyEmpty:
-                        store.showToast("画布已空")
-                    case .cleared:
-                        store.showToast("已清空画布")
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.white.opacity(0.92))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ToolbarButton(label: "选择", systemImage: "cursorarrow", active: store.tool == .select) {
+                        store.setTool(.select)
+                    }
+                    ToolbarButton(label: "高亮", systemImage: "highlighter", active: store.tool == .highlight, accent: true) {
+                        store.setTool(.highlight)
+                    }
+                    ToolbarButton(label: "橡皮擦", systemImage: "eraser", active: store.tool == .erase, accent: true) {
+                        store.setTool(.erase)
+                    }
+                    ToolbarButton(label: "文本", systemImage: "text.cursor") {
+                        store.createManualText(in: viewportSize)
+                    }
+                    ToolbarButton(label: store.clearConfirmArmed ? "确认清空" : "清空", systemImage: "trash", active: store.clearConfirmArmed, accent: true) {
+                        switch store.requestClearCanvas() {
+                        case .armed:
+                            store.showToast("再点一次清空画布")
+                        case .alreadyEmpty:
+                            store.showToast("画布已空")
+                        case .cleared:
+                            store.showToast("已清空画布")
+                        }
+                    }
+                    Divider()
+                        .frame(height: 18)
+                    ToolbarButton(label: "撤销", systemImage: "arrow.uturn.backward", disabled: !store.canUndo) {
+                        store.undo()
+                    }
+                    ToolbarButton(label: "重做", systemImage: "arrow.uturn.forward", disabled: !store.canRedo) {
+                        store.redo()
+                    }
+                    ToolbarButton(label: "帮助", systemImage: "questionmark.circle") {
+                        store.isHelpPresented = true
                     }
                 }
-                Divider()
-                    .frame(height: 18)
-                ToolbarButton(label: "撤销", systemImage: "arrow.uturn.backward", disabled: !store.canUndo) {
-                    store.undo()
-                }
-                ToolbarButton(label: "重做", systemImage: "arrow.uturn.forward", disabled: !store.canRedo) {
-                    store.redo()
-                }
-                ToolbarButton(label: "帮助", systemImage: "questionmark.circle") {
-                    store.isHelpPresented = true
-                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(WhiteboardPalette.panelBorder, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: WhiteboardPalette.ink.opacity(0.12), radius: 18, x: 0, y: 10)
         .frame(maxWidth: .infinity)
-        .clipped()
     }
 }
 
@@ -802,11 +809,26 @@ private struct ModeStatusBadge: View {
                     .frame(width: 8, height: 8)
                 Text(label)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(WhiteboardPalette.inkMuted)
+                    .foregroundStyle(WhiteboardPalette.ink)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.white.opacity(0.74), in: Capsule())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                LinearGradient(
+                    colors: [
+                        .white.opacity(0.97),
+                        WhiteboardPalette.paper.opacity(0.94),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .stroke(color.opacity(0.28), lineWidth: 1)
+            )
+            .shadow(color: WhiteboardPalette.ink.opacity(0.10), radius: 10, x: 0, y: 6)
         }
         .frame(maxWidth: .infinity)
     }
@@ -1127,25 +1149,33 @@ private struct ToastOverlay: View {
 private struct WhiteboardHelpSheet: View {
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    helpCard(title: "文本", lines: [
-                        "点击工具栏“文本”会在当前视口中心创建文本卡片。",
-                        "选中文本后可拖动、缩放和编辑。",
-                    ])
-                    helpCard(title: "高亮与代称", lines: [
-                        "切到高亮模式后，在文本上拖动即可选出字符区间。",
-                        "点高亮上方的小圆点可设置 A-F 代称，或删除高亮。",
-                    ])
-                    helpCard(title: "橡皮擦", lines: [
-                        "切到橡皮擦模式后，在文本卡片上划一下即可删除整张卡片。",
-                    ])
-                    helpCard(title: "语音", lines: [
-                        "底部语音按钮使用 iOS 本地 Speech 流式转写。",
-                        "按住说话，松开发送，上滑后松开取消。",
-                    ])
+            GeometryReader { proxy in
+                let horizontalInset = min(max((proxy.size.width - 560) / 2, 16), 24)
+                let contentWidth = max(1, proxy.size.width - horizontalInset * 2)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        helpCard(title: "文本", lines: [
+                            "点击工具栏“文本”会在当前视口中心创建文本卡片。",
+                            "选中文本后可拖动、缩放和编辑。",
+                        ])
+                        helpCard(title: "高亮与代称", lines: [
+                            "切到高亮模式后，在文本上拖动即可选出字符区间。",
+                            "点高亮上方的小圆点可设置 A-F 代称，或删除高亮。",
+                        ])
+                        helpCard(title: "橡皮擦", lines: [
+                            "切到橡皮擦模式后，在文本卡片上划一下即可删除整张卡片。",
+                        ])
+                        helpCard(title: "语音", lines: [
+                            "底部语音按钮使用 iOS 本地 Speech 流式转写。",
+                            "按住说话，松开发送，上滑后松开取消。",
+                        ])
+                    }
+                    .frame(width: contentWidth, alignment: .leading)
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(20)
+                .scrollIndicators(.hidden)
             }
             .navigationTitle("帮助")
         }
