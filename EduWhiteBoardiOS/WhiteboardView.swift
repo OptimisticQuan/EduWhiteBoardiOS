@@ -29,9 +29,11 @@ struct WhiteboardScreen: View {
     var body: some View {
         GeometryReader { proxy in
             let horizontalInset = WhiteboardScreenLayout.horizontalInset(for: proxy.size.width)
+            let contentWidth = max(1, proxy.size.width - horizontalInset * 2)
+            let contentHeight = max(1, proxy.size.height - WhiteboardScreenLayout.verticalSpacing)
             let activeCanvasSize = canvasViewportSize.width > 0 && canvasViewportSize.height > 0
                 ? canvasViewportSize
-                : proxy.size
+                : CGSize(width: contentWidth, height: contentHeight)
 
             ZStack {
                 WhiteboardBackdrop()
@@ -39,6 +41,7 @@ struct WhiteboardScreen: View {
 
                 VStack(spacing: WhiteboardScreenLayout.verticalSpacing) {
                     ToolbarStrip(store: store, viewportSize: activeCanvasSize)
+                        .frame(width: contentWidth)
 
                     WhiteboardCanvas(
                         store: store,
@@ -46,7 +49,8 @@ struct WhiteboardScreen: View {
                         panOrigin: $panOrigin,
                         zoomOrigin: $zoomOrigin
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: contentWidth)
+                    .frame(maxHeight: .infinity)
                     .layoutPriority(1)
                     .overlay {
                         GeometryReader { canvasProxy in
@@ -72,9 +76,9 @@ struct WhiteboardScreen: View {
                             .padding(.top, WhiteboardScreenLayout.verticalSpacing)
                     }
                 }
+                .frame(width: contentWidth, height: contentHeight, alignment: .top)
                 .padding(.horizontal, horizontalInset)
                 .padding(.top, WhiteboardScreenLayout.verticalSpacing)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 // .debugLayout(.red)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -91,7 +95,6 @@ struct WhiteboardScreen: View {
             }
         }
         .ignoresSafeArea(.container, edges: .bottom)
-        .debugLayout(.red)
     }
 
     private func updateCanvasViewportSize(_ size: CGSize) {
@@ -161,12 +164,13 @@ private struct WhiteboardCanvas: View {
                     Text("点击工具栏文本按钮创建卡片，或按住底部麦克风开始本地转写。")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(WhiteboardPalette.inkMuted)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(28)
                 .background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.top, max(28, viewportSize.height * 0.18))
                 .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -770,7 +774,8 @@ private struct ToolbarStrip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
             .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -795,6 +800,7 @@ private struct ToolbarStrip: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
+        .clipped()
     }
 }
 
