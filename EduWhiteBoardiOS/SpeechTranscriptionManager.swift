@@ -93,6 +93,9 @@ final class SpeechTranscriptionManager: ObservableObject {
     private var bestEffortTranscript = ""
     private var debugSessionID = "--------"
     private var diagnostics: CaptureDiagnostics?
+    private var pendingFinishDecision: Bool?
+    private var finishDecisionContinuation: CheckedContinuation<Bool, Never>?
+    private var completionTask: Task<String?, Error>?
 
     var isBusy: Bool {
         state != .idle
@@ -155,6 +158,9 @@ final class SpeechTranscriptionManager: ObservableObject {
         debugSessionID = String(UUID().uuidString.prefix(8))
         liveText = ""
         bestEffortTranscript = ""
+        pendingFinishDecision = nil
+        finishDecisionContinuation = nil
+        completionTask = nil
         state = .preparing
         let sessionID = debugSessionID
         let diagnostics = CaptureDiagnostics()
@@ -259,7 +265,17 @@ final class SpeechTranscriptionManager: ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             Self.debugPrint(sessionID: sessionID, "audio engine started")
-            state = .recording
+            completionTask = Task { @MainActor [weak self] in
+                guard let self else {
+                    return nil
+                }
+
+                return try await self.awaitFinishAndComplete(
+                    sessionID: sessionID,
+                    diagnostics: diagnostics
+                )
+            }
+            state = pendingFinishDecision == nil ? .recording : .finalizing
         } catch {
             Self.debugPrint(sessionID: sessionID, "startRecording failed: \(error.localizedDescription)")
             await resetPipeline(cancelAnalyzer: true)
@@ -285,10 +301,69 @@ final class SpeechTranscriptionManager: ObservableObject {
         }
 
         let sessionID = debugSessionID
-        let diagnostics = diagnostics
         Self.debugPrint(
             sessionID: sessionID,
-            "finishRecording begin commit=\(commit) live=\(Self.preview(liveText)) fallback=\(Self.preview(bestEffortTranscript))"
+            "finishRecording requested commit=\(commit) live=\(Self.preview(liveText)) fallback=\(Self.preview(bestEffortTranscript))"
+        )
+
+        requestFinish(commit: commit)
+
+        while completionTask == nil, state != .idle {
+            await Task.yield()
+        }
+
+        guard let completionTask else {
+            Self.debugPrint(sessionID: sessionID, "finishRecording ended before completion task became available")
+            return nil
+        }
+
+        return try await completionTask.value
+    }
+
+    private func requestFinish(commit: Bool) {
+        guard pendingFinishDecision == nil else {
+            return
+        }
+
+        pendingFinishDecision = commit
+        if state != .idle {
+            state = .finalizing
+        }
+
+        finishDecisionContinuation?.resume(returning: commit)
+        finishDecisionContinuation = nil
+    }
+
+    private func waitForFinishDecision() async -> Bool {
+        if let pendingFinishDecision {
+            return pendingFinishDecision
+        }
+
+        return await withCheckedContinuation { continuation in
+            finishDecisionContinuation = continuation
+        }
+    }
+
+    private func awaitFinishAndComplete(
+        sessionID: String,
+        diagnostics: CaptureDiagnostics
+    ) async throws -> String? {
+        let commit = await waitForFinishDecision()
+        return try await completeRecording(
+            commit: commit,
+            sessionID: sessionID,
+            diagnostics: diagnostics
+        )
+    }
+
+    private func completeRecording(
+        commit: Bool,
+        sessionID: String,
+        diagnostics: CaptureDiagnostics?
+    ) async throws -> String? {
+        Self.debugPrint(
+            sessionID: sessionID,
+            "completeRecording begin commit=\(commit) live=\(Self.preview(liveText)) fallback=\(Self.preview(bestEffortTranscript))"
         )
 
         audioEngine?.inputNode.removeTap(onBus: 0)
@@ -297,19 +372,6 @@ final class SpeechTranscriptionManager: ObservableObject {
         inputContinuation = nil
 
         if commit {
-            if let progressiveText = committedTranscript() {
-                Self.debugPrint(
-                    sessionID: sessionID,
-                    "returning progressive immediately text=\(Self.preview(progressiveText)) \(Self.describe(diagnostics: diagnostics))"
-                )
-                let cleanup = detachPipelineForImmediateReturn(
-                    sessionID: sessionID,
-                    reason: "commit-with-progressive"
-                )
-                Self.scheduleBackgroundCleanup(cleanup)
-                return progressiveText
-            }
-
             state = .finalizing
             do {
                 let progressiveText = committedTranscript()
@@ -334,56 +396,16 @@ final class SpeechTranscriptionManager: ObservableObject {
                     }
                     throw error
                 }
-                let finalizeTime = Self.preferredFinalizeTime(
-                    reported: reportedLastSampleTime,
-                    expected: diagnostics?.lastInputEndTime
-                )
-
-                if let finalizeTime {
-                    let analyzer = self.analyzer
-                    Self.debugPrint(
-                        sessionID: sessionID,
-                        "analysis finished reported=\(Self.describe(optionalTime: reportedLastSampleTime)) expected=\(Self.describe(optionalTime: diagnostics?.lastInputEndTime)) finalize=\(Self.describe(time: finalizeTime))"
-                    )
-                    do {
-                        try await Self.withTimeout(seconds: 2.5, stage: "整理识别结果") {
-                            try await analyzer?.finalizeAndFinish(through: finalizeTime)
-                        }
-                        Self.debugPrint(sessionID: sessionID, "finalize completed")
-                    } catch {
-                        if let progressiveText {
-                            Self.debugPrint(
-                                sessionID: sessionID,
-                                "finalize bypassed after error=\(error.localizedDescription) using progressive=\(Self.preview(progressiveText))"
-                            )
-                            await analyzer?.cancelAndFinishNow()
-                            let committedText = committedTranscript() ?? progressiveText
-                            await resetPipeline(cancelAnalyzer: false)
-                            return committedText
-                        }
-                        throw error
-                    }
-                } else {
-                    if let progressiveText {
-                        Self.debugPrint(
-                            sessionID: sessionID,
-                            "analysis returned no lastSampleTime; using progressive=\(Self.preview(progressiveText))"
-                        )
-                        await analyzer?.cancelAndFinishNow()
-                        await resetPipeline(cancelAnalyzer: false)
-                        return progressiveText
-                    }
-
-                    Self.debugPrint(sessionID: sessionID, "analysis returned no lastSampleTime; cancelling analyzer")
-                    await analyzer?.cancelAndFinishNow()
-                }
-
-                let finalText = committedTranscript()
+                let finalText = committedTranscript() ?? progressiveText
                 Self.debugPrint(
                     sessionID: sessionID,
-                    "finishRecording success final=\(Self.preview(finalText ?? "")) \(Self.describe(diagnostics: diagnostics))"
+                    "finishRecording success reported=\(Self.describe(optionalTime: reportedLastSampleTime)) expected=\(Self.describe(optionalTime: diagnostics?.lastInputEndTime)) final=\(Self.preview(finalText ?? "")) \(Self.describe(diagnostics: diagnostics))"
                 )
-                await resetPipeline(cancelAnalyzer: false)
+                let cleanup = detachPipelineForImmediateReturn(
+                    sessionID: sessionID,
+                    reason: finalText == nil ? "commit-empty-after-analysis" : "commit-after-analysis"
+                )
+                Self.scheduleBackgroundCleanup(cleanup)
                 return finalText
             } catch {
                 if let progressiveText = committedTranscript() {
@@ -399,7 +421,11 @@ final class SpeechTranscriptionManager: ObservableObject {
                     return progressiveText
                 }
                 Self.debugPrint(sessionID: sessionID, "finishRecording failed: \(error.localizedDescription)")
-                await resetPipeline(cancelAnalyzer: true)
+                let cleanup = detachPipelineForImmediateReturn(
+                    sessionID: sessionID,
+                    reason: "finish-failed"
+                )
+                Self.scheduleBackgroundCleanup(cleanup)
                 throw SpeechTranscriptionError.failedToFinalize(underlying: error)
             }
         } else {
@@ -580,6 +606,9 @@ final class SpeechTranscriptionManager: ObservableObject {
         analysisTask = nil
         audioSampleClock = nil
         diagnostics = nil
+        pendingFinishDecision = nil
+        finishDecisionContinuation = nil
+        completionTask = nil
         debugSessionID = "--------"
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -611,6 +640,9 @@ final class SpeechTranscriptionManager: ObservableObject {
         analysisTask = nil
         audioSampleClock = nil
         diagnostics = nil
+        pendingFinishDecision = nil
+        finishDecisionContinuation = nil
+        completionTask = nil
         debugSessionID = "--------"
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

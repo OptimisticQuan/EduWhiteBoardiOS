@@ -1366,6 +1366,10 @@ private struct VoiceDockButton: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if !isPressing {
+                    guard !speech.isBusy else {
+                        return
+                    }
+
                     isPressing = true
                     startTask = Task {
                         do {
